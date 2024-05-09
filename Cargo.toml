@@ -1,0 +1,9 @@
+[package]
+name = "rust-zip-exract"
+version = "0.1.0"
+edition = "2021"
+
+
+[dependencies]
+#  It is used in Rust to open zip files and manipulate their contents.
+zip = "1.0.0"
