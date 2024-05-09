@@ -1,121 +1,88 @@
-use std::fs;
-use std::io;
+use std::fs::{self, File};
+use std::io::{self, copy};
+use std::path::Path;
 
 fn main() {
-    // Step 1: Process the real program in the `real_main` function
-    // For a clean exit, use `std::process::exit` in the `main` function
-    std::process::exit(real_main());
+    // Exit the program with the appropriate exit code based on the result of the `extract_zip` function.
+    std::process::exit(match extract_zip() {
+        Ok(_) => 0, // Exit with code 0 if extraction succeeds.
+        Err(e) => {
+            eprintln!("{}", e); // Print the error message if extraction fails.
+            1 // Exit with code 1 if extraction fails.
+        }
+    });
 }
 
-fn real_main() -> i32 {
-    // Step 2: Create a vector to collect user input from the CLI
-    let args: Vec<_> = std::env::args().collect();
+fn extract_zip() -> Result<(), io::Error> {
+    // Collect command line arguments into a vector.
+    let args: Vec<String> = std::env::args().collect();
 
-    // Step 3: Show usage instructions if arguments are less than 2
+    // Check if there are enough arguments.
     if args.len() < 2 {
-        println!("Usage: {} <file_name>", args[0]);
-        return 1;
+        println!("Usage: {} <file_name>", args[0]); // Print the usage message if there are not enough arguments.
+        return Ok(()); // Return early with Ok(()) if there are not enough arguments.
     }
 
-    // Step 4: The file name is at the 2nd position (index 1) in the arguments
-    let fname = std::path::Path::new(&*args[1]);
+    // Get the file name from the command line arguments.
+    let fname = Path::new(&args[1]);
 
-    // Step 5: Open the file using standard fs
-    let file = match fs::File::open(&fname) {
-        Ok(file) => file,
-        Err(_) => {
-            println!("The specified file could not be found or opened.");
-            return 1;
-        }
-    };
+    // Open the file.
+    let file = File::open(&fname)?;
 
-    // Step 6: Use the archive reader function
-    let mut archive = match zip::ZipArchive::new(file) {
-        Ok(archive) => archive,
-        Err(_) => {
-            println!("The zip archive could not be opened or is invalid.");
-            return 1;
-        }
-    };
+    // Create a ZipArchive from the file.
+    let mut archive = zip::ZipArchive::new(file)?;
 
-    // Step 7: Iterate over each file in the archive
+    // Iterate over each file in the archive.
     for i in 0..archive.len() {
-        let mut file = match archive.by_index(i) {
-            Ok(file) => file,
-            Err(_) => {
-                println!("The file in the archive could not be opened.");
-                return 1;
-            }
-        };
+        // Get the file at the current index.
+        let mut file = archive.by_index(i)?;
 
-        // Step 8: Set the path where the files will be extracted
+        // Get the path to extract the file to.
         let outpath = match file.enclosed_name() {
             Some(path) => path.to_owned(),
-            None => continue,
+            None => continue, // Skip to the next file if the path is None.
         };
 
-        // Step 9: Get the file comment and print if it exists
+        // Get the comment associated with the file.
         let comment = file.comment();
         if !comment.is_empty() {
-            println!("File {} comment: {}", i, comment);
+            println!("File {} comment: {}", i, comment); // Print the file comment if it's not empty.
         }
 
-        // Step 10: Check if the file is a directory
-        if (*file.name()).ends_with('/') {
-            // Step 11: If the file is a directory, create the directory
-            println!("File {} extracted to \"{}\"", i, outpath.display());
-            if let Err(_) = fs::create_dir_all(&outpath) {
-                println!("An error occurred while creating the directory.");
-                return 1;
-            }
+        // Check if the file is a directory.
+        if file.name().ends_with('/') {
+            println!("File {} extracted to \"{}\"", i, outpath.display()); // Print a message indicating the directory extraction.
+            fs::create_dir_all(&outpath)?; // Create the directory.
         } else {
-            // Step 12: If the file is a regular file, extract the file
             println!(
                 "File {} extracted to \"{}\" ({} bytes)",
                 i,
                 outpath.display(),
                 file.size()
-            );
+            ); // Print a message indicating the file extraction and its size.
 
-            // Step 13: Check the parent directory of the file and create it if it doesn't exist
+            // Create parent directories if they don't exist.
             if let Some(p) = outpath.parent() {
                 if !p.exists() {
-                    if let Err(_) = fs::create_dir_all(&p) {
-                        println!("An error occurred while creating the directory.");
-                        return 1;
-                    }
+                    fs::create_dir_all(&p)?;
                 }
             }
 
-            // Step 14: Create a new file to extract the file and copy its content
-            let mut outfile = match fs::File::create(&outpath) {
-                Ok(outfile) => outfile,
-                Err(_) => {
-                    println!("An error occurred while creating the file.");
-                    return 1;
-                }
-            };
-
-            if let Err(_) = io::copy(&mut file, &mut outfile) {
-                println!("An error occurred while copying the file.");
-                return 1;
-            }
+            // Create and copy the file contents to the output path.
+            let mut outfile = File::create(&outpath)?;
+            copy(&mut file, &mut outfile)?;
         }
 
-        // Step 15: Get and set permissions for the extracted files (Unix only)
+        // Set file permissions if running on a Unix-like system.
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
 
             if let Some(mode) = file.unix_mode() {
-                if let Err(_) = fs::set_permissions(&outpath, fs::Permissions::from_mode(mode)) {
-                    println!("An error occurred while setting file permissions.");
-                    return 1;
-                }
+                fs::set_permissions(&outpath, fs::Permissions::from_mode(mode))?;
             }
         }
     }
 
-    // Step 16: The program has completed successfully, return the exit code
-    0
+    Ok(()) // Return Ok(()) if extraction succeeds.
 }
